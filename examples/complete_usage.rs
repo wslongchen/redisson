@@ -19,30 +19,50 @@
  *
  */
 use std::time::Duration;
-use std::thread;
+use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use tokio::runtime::Runtime;
-use redisson::{AsyncRedissonClient, BatchResult, RLockable, RedissonClient, RedissonConfig, RedissonError, RedissonResult};
+use redisson::{AsyncRedissonClient, BatchPriority, BatchResult, Cache, RedissonClient, RedissonConfig, RedissonResult, SetCommand};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct User {
-    id: u64,
-    name: String,
-    email: String,
-    roles: Vec<String>,
+struct Order {
+    id: String,
+    customer_id: String,
+    amount: f64,
+    items: Vec<OrderItem>,
+    status: OrderStatus,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct Product {
-    id: String,
-    name: String,
+struct OrderItem {
+    product_id: String,
+    quantity: i32,
     price: f64,
-    stock: i32,
-    tags: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+enum OrderStatus {
+    Pending,
+    Processing,
+    Shipped,
+    Delivered,
+    Cancelled,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct UserSession {
+    user_id: String,
+    session_token: String,
+    created_at: u64,
+    last_activity: u64,
+    ip_address: String,
 }
 
 fn main() -> RedissonResult<()> {
-    // 1. 配置客户端
+    println!("🚀 Redisson Rust - Complete Optimized Example");
+    println!("=============================================\n");
+
+    // 1. Create configuration
     let config = RedissonConfig::single_server("redis://127.0.0.1:6379")
         .with_pool_size(20)
         .with_connection_timeout(Duration::from_secs(5))
@@ -50,518 +70,322 @@ fn main() -> RedissonResult<()> {
         .with_lock_expire_time(Duration::from_secs(30))
         .with_watchdog_timeout(Duration::from_secs(10))
         .with_retry_count(3)
-        .with_drift_factor(0.01);
+        .with_drift_factor(0.01)
+        .with_backup_pool_count(2);
 
-    println!("🚀 正在创建Redisson客户端...");
-
-    // 2. 创建同步客户端
+    // 2. Create client
     let client = RedissonClient::new(config)?;
-    println!("✅ 客户端创建成功");
+    println!("✅ Client created successfully\n");
 
-    // 3. 基本数据结构使用示例
-    basic_data_structures(&client)?;
+    // 3. Demonstrate Stream functionality
+    println!("📡 Redis Stream Demo");
+    stream_demo(&client)?;
 
-    // 4. 分布式锁使用示例
-    distributed_locks(&client)?;
+    // 4. Demonstrate batch operation optimization
+    println!("\n📚 Batch Operation Optimization Demo");
+    batch_optimization_demo(&client)?;
 
-    // 5. 高级同步器使用示例
-    advanced_synchronizers(&client)?;
+    // 5. Demonstrate local cache integration
+    println!("\n💾 Local Cache Integration Demo");
+    cache_integration_demo(&client)?;
 
-    // 6. 批量操作示例
-    batch_operations(&client)?;
+    // 6. Demonstrate performance statistics
+    println!("\n📊 Performance Statistics");
+    show_stats(&client)?;
 
-    // 7. 事务操作示例
-    transaction_operations(&client)?;
+    // 7. Asynchronous example
+    println!("\n⚡ Asynchronous Operations Demo");
+    async_demo()?;
 
-    // 8. 发布订阅示例
-    pubsub_example(&client)?;
+    println!("\n🎉 All demos completed!");
 
-    // 9. 延迟队列示例
-    delayed_queue_example(&client)?;
-
-    // 10. 异步操作示例
-    async_example()?;
-
-    println!("\n🎉 所有示例执行完成!");
-
-    // 清理资源
     client.shutdown()?;
-    println!("🔌 客户端已关闭");
+    println!("🔌 Client closed");
 
     Ok(())
 }
 
-fn basic_data_structures(client: &RedissonClient) -> RedissonResult<()> {
-    println!("\n📦 基本数据结构示例:");
+fn stream_demo(client: &RedissonClient) -> RedissonResult<()> {
+    println!("  1. Creating order stream...");
+    let order_stream = client.get_stream::<Order>("orders:stream");
 
-    // RBucket 示例
-    println!("1. RBucket (键值对):");
-    let bucket = client.get_bucket::<User>("user:alice");
+    // Create consumer group
+    order_stream.create_group("order-processors", "0")?;
+    println!("     ✅ Created consumer group: order-processors");
 
-    let alice = User {
-        id: 1,
-        name: "Alice".to_string(),
-        email: "alice@example.com".to_string(),
-        roles: vec!["admin".to_string(), "user".to_string()],
+    // Add order messages
+    println!("  2. Publishing order messages...");
+
+    let order1 = Order {
+        id: "ORD-001".to_string(),
+        customer_id: "CUST-001".to_string(),
+        amount: 299.99,
+        items: vec![
+            OrderItem {
+                product_id: "PROD-001".to_string(),
+                quantity: 2,
+                price: 149.99,
+            },
+        ],
+        status: OrderStatus::Pending,
     };
 
-    bucket.set(&alice)?;
-    println!("   ✅ 设置用户数据");
+    let mut fields1 = HashMap::new();
+    fields1.insert("order".to_string(), order1.clone());
 
-    let retrieved: Option<User> = bucket.get()?;
-    println!("   ✅ 获取用户数据: {:?}", retrieved.map(|u| u.name));
+    let message_id1 = order_stream.add_auto_id(&fields1)?;
+    println!("     📨 Order 1 message ID: {}", message_id1);
 
-    // 设置过期时间
-    bucket.set_with_ttl(&alice, Duration::from_secs(60))?;
-    println!("   ✅ 设置60秒过期时间");
-
-    // RMap 示例
-    println!("\n2. RMap (哈希表):");
-    let product_map = client.get_map::<String, Product>("products");
-
-    let laptop = Product {
-        id: "p001".to_string(),
-        name: "Laptop".to_string(),
-        price: 999.99,
-        stock: 50,
-        tags: vec!["electronics".to_string(), "computer".to_string()],
+    let order2 = Order {
+        id: "ORD-002".to_string(),
+        customer_id: "CUST-002".to_string(),
+        amount: 599.99,
+        items: vec![
+            OrderItem {
+                product_id: "PROD-002".to_string(),
+                quantity: 1,
+                price: 599.99,
+            },
+        ],
+        status: OrderStatus::Pending,
     };
 
-    let phone = Product {
-        id: "p002".to_string(),
-        name: "Smartphone".to_string(),
-        price: 699.99,
-        stock: 100,
-        tags: vec!["electronics".to_string(), "mobile".to_string()],
-    };
+    let mut fields2 = HashMap::new();
+    fields2.insert("order".to_string(), order2.clone());
 
-    product_map.put(&"p001".to_string(), &laptop)?;
-    product_map.put(&"p002".to_string(), &phone)?;
-    println!("   ✅ 添加2个产品");
+    let message_id2 = order_stream.add_auto_id(&fields2)?;
+    println!("     📨 Order 2 message ID: {}", message_id2);
 
-    let laptop_retrieved = product_map.get(&"p001".to_string())?;
-    println!("   ✅ 获取产品p001: {:?}", laptop_retrieved.map(|p| p.name));
+    // Read messages
+    println!("  3. Consuming order messages...");
+    let messages = order_stream.read_group("order-processors", "consumer-1", Some(10), None, false)?;
 
-    let size = product_map.size()?;
-    println!("   ✅ 产品数量: {}", size);
+    println!("     📥 Received {} messages", messages.len());
 
-    // RList 示例
-    println!("\n3. RList (列表):");
-    let task_list = client.get_list::<String>("tasks");
+    for (i, message) in messages.iter().enumerate() {
+        if let Some(order_field) = message.fields.get("order") {
+            println!("     🛒 Message {}: Order ID: {}, Amount: ${}",
+                     i + 1, order_field.id, order_field.amount);
 
-    task_list.add(&"Task 1: Write documentation".to_string())?;
-    task_list.add(&"Task 2: Fix bugs".to_string())?;
-    task_list.add(&"Task 3: Write tests".to_string())?;
-    println!("   ✅ 添加3个任务");
-
-    let tasks = task_list.range(0, -1)?;
-    println!("   ✅ 所有任务: {:?}", tasks);
-
-    let first_task = task_list.pop_front()?;
-    println!("   ✅ 弹出第一个任务: {:?}", first_task);
-
-    // RSet 示例
-    println!("\n4. RSet (集合):");
-    let unique_tags = client.get_set::<String>("product:tags");
-
-    unique_tags.add(&"electronics".to_string())?;
-    unique_tags.add(&"computer".to_string())?;
-    unique_tags.add(&"electronics".to_string())?; // 重复项
-    println!("   ✅ 添加标签(包含重复项)");
-
-    let tags = unique_tags.members()?;
-    println!("   ✅ 唯一标签: {:?}", tags);
-    println!("   ✅ 标签数量: {}", tags.len());
-
-    // RSortedSet 示例
-    println!("\n5. RSortedSet (有序集合):");
-    let leaderboard = client.get_sorted_set::<String>("game:leaderboard");
-
-    leaderboard.add(&"player1".to_string(), 1500.0)?;
-    leaderboard.add(&"player2".to_string(), 1800.0)?;
-    leaderboard.add(&"player3".to_string(), 1200.0)?;
-    println!("   ✅ 添加玩家分数");
-
-    let top_players = leaderboard.rev_range(0, 2)?;
-    println!("   ✅ 排行榜前3名: {:?}", top_players);
-
-    let player2_score = leaderboard.score(&"player2".to_string())?;
-    println!("   ✅ player2分数: {:?}", player2_score);
-
-    Ok(())
-}
-
-fn distributed_locks(client: &RedissonClient) -> RedissonResult<()> {
-    println!("\n🔒 分布式锁示例:");
-
-    // 1. 基本锁
-    println!("1. 基本可重入锁:");
-    let lock = client.get_lock("resource:update");
-
-    println!("   尝试获取锁...");
-    lock.lock()?;
-    println!("   ✅ 锁获取成功");
-
-    // 模拟业务操作
-    thread::sleep(Duration::from_millis(100));
-    println!("   🔧 执行关键业务操作...");
-
-    lock.unlock()?;
-    println!("   ✅ 锁释放成功");
-
-    // 2. 尝试锁
-    println!("\n2. 尝试锁 (带超时):");
-    let try_lock = client.get_lock("resource:try");
-
-    let acquired = try_lock.try_lock_with_timeout(Duration::from_secs(1))?;
-    if acquired {
-        println!("   ✅ 成功获取锁");
-        try_lock.unlock()?;
-    } else {
-        println!("   ⏱️  获取锁超时");
-    }
-
-    // 3. 公平锁
-    println!("\n3. 公平锁:");
-    let fair_lock = client.get_fair_lock("resource:fair");
-
-    fair_lock.lock()?;
-    println!("   ✅ 公平锁获取成功");
-
-    // 公平锁保证按请求顺序获取锁
-    fair_lock.unlock()?;
-    println!("   ✅ 公平锁释放成功");
-
-    // 4. 读写锁
-    println!("\n4. 读写锁:");
-    let rw_lock = client.get_read_write_lock("resource:data", Duration::from_secs(60));
-
-    // 获取读锁
-    let read_lock = rw_lock.read_lock();
-    read_lock.lock()?;
-    println!("   📖 读锁获取成功 (允许多个读)");
-    read_lock.unlock()?;
-
-    // 获取写锁
-    let write_lock = rw_lock.write_lock();
-    write_lock.lock()?;
-    println!("   ✍️  写锁获取成功 (独占)");
-    write_lock.unlock()?;
-
-    // 5. 红锁
-    println!("\n5. 红锁 (RedLock):");
-    let redlock_names = "lock:node1";
-
-    let redlock = client.get_red_lock(redlock_names.to_string());
-    redlock.lock()?;
-    println!("   🔴 红锁获取成功 (多数节点同意)");
-    redlock.unlock()?;
-
-    // 6. 数据结构自带锁
-    println!("\n6. 数据结构自带锁:");
-    let data_bucket = client.get_bucket::<String>("shared:data");
-
-    // 直接锁住整个数据结构
-    data_bucket.lock()?;
-    data_bucket.set(&"locked data".to_string())?;
-    data_bucket.unlock()?;
-    println!("   ✅ 数据结构锁使用成功");
-
-    Ok(())
-}
-
-fn advanced_synchronizers(client: &RedissonClient) -> RedissonResult<()> {
-    println!("\n⚙️  高级同步器示例:");
-
-    // 1. 信号量
-    println!("1. 信号量 (Semaphore):");
-    let semaphore = client.get_semaphore("api:rate:limit", 5);
-
-    let acquired = semaphore.try_acquire(1, Duration::from_millis(100))?;
-    if acquired {
-        println!("   ✅ 获取信号量许可成功");
-
-        // 模拟API调用
-        thread::sleep(Duration::from_millis(50));
-        println!("   📞 执行API调用...");
-
-        semaphore.release(1)?;
-        println!("   ✅ 释放信号量许可");
-    }
-
-    let available = semaphore.available_permits()?;
-    println!("   📊 可用许可数: {}", available);
-
-    // 2. 限流器
-    println!("\n2. 限流器 (Rate Limiter):");
-    let rate_limiter = client.get_rate_limiter("api:limiter", 10.0, 20.0); // 10 req/s, 容量20
-
-    for i in 1..=15 {
-        if rate_limiter.try_acquire(1.0)? {
-            println!("   ✅ 请求 {}: 允许通过", i);
-        } else {
-            println!("   🚫 请求 {}: 被限流", i);
+            // Acknowledge message processing
+            order_stream.ack("order-processors", &[message.id.clone()])?;
         }
-        thread::sleep(Duration::from_millis(50));
     }
 
-    // 3. 计数器
-    println!("\n3. 倒计数器 (CountDownLatch):");
-    let latch = client.get_count_down_latch("task:completion", 3);
+    // Get stream information
+    println!("  4. Getting stream information...");
+    let info = order_stream.info()?;
+    println!("     📊 Stream length: {}", info.length);
+    println!("     👥 Number of consumer groups: {}", info.groups);
 
-    // 启动多个工作线程
-    let latch_clone = latch.clone();
-    let handle1 = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(100));
-        println!("   👷 工作线程1完成任务");
-        latch_clone.count_down().unwrap();
-    });
-
-    let latch_clone = latch.clone();
-    let handle2 = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(200));
-        println!("   👷 工作线程2完成任务");
-        latch_clone.count_down().unwrap();
-    });
-
-    let latch_clone = latch.clone();
-    let handle3 = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(300));
-        println!("   👷 工作线程3完成任务");
-        latch_clone.count_down().unwrap();
-    });
-
-    println!("   ⏳ 主线程等待所有工作完成...");
-    latch.r#await(Some(Duration::from_secs(5)))?;
-    println!("   ✅ 所有工作完成!");
-
-    handle1.join().unwrap();
-    handle2.join().unwrap();
-    handle3.join().unwrap();
-
-    // 4. 原子操作
-    println!("\n4. 原子长整型:");
-    let atomic_counter = client.get_atomic_long("global:counter");
-
-    let initial = atomic_counter.get()?;
-    println!("   📊 初始值: {}", initial);
-
-    let new_value = atomic_counter.increment_and_get()?;
-    println!("   ➕ 递增后: {}", new_value);
-
-    let added = atomic_counter.add_and_get(10)?;
-    println!("   🔟 加10后: {}", added);
+    // Set max length and trim
+    println!("  5. Trimming stream...");
+    let trimmed = order_stream.trim(1000, true)?;
+    println!("     ✂️  Trimmed {} messages", trimmed);
 
     Ok(())
 }
 
-fn batch_operations(client: &RedissonClient) -> RedissonResult<()> {
-    println!("\n📚 批量操作示例:");
-
-    // 1. 创建批量操作
+fn batch_optimization_demo(client: &RedissonClient) -> RedissonResult<()> {
+    println!("  1. Creating batch operation...");
     let mut batch = &mut client.create_batch();
 
-    // 添加多个操作
-    for i in 1..=10 {
-        let key = format!("batch:key:{}", i);
-        let value = format!("value:{}", i);
+    // Add multiple operations
+    let start = std::time::Instant::now();
+
+    for i in 1..=100 {
+        let key = format!("batch:user:{}", i);
+        let value = format!("User {}", i);
         batch = batch.set(&key, &value);
 
-        if i % 3 == 0 {
-            batch = batch.get::<String>(key);
+        if i % 10 == 0 {
+            batch = batch.get::<String>(key.to_string());
+        }
+
+        if i % 20 == 0 {
+            batch = batch.expire(key, 3600);
         }
     }
 
-    println!("   📋 添加了10个SET操作和3个GET操作");
+    println!("     📋 Added 100 SET operations, 10 GET operations, and 5 EXPIRE operations");
 
-    // 2. 执行批量操作
-    let start = std::time::Instant::now();
+    // Execute batch operation
+    println!("  2. Executing batch operation...");
     let results = batch.execute()?.unwrap_or_default();
     let duration = start.elapsed();
 
-    println!("   ⚡ 批量执行完成，耗时: {:?}", duration);
-    println!("   📊 返回结果数量: {}", results.len());
+    println!("     ⚡ Batch execution duration: {:?}", duration);
+    println!("     📊 Number of results returned: {}", results.len());
 
-    // 3. 分析结果
-    let mut set_success = 0;
+    // Analyze results
+    let set_count = results.iter()
+        .filter(|r| !matches!(r, BatchResult::Error(_)))
+        .count();
 
-    for result in results {
-        match result {
-            BatchResult::Error{..} => set_success += 1,
-            _ => {}
-        }
+    let get_count = results.iter()
+        .filter(|r| !matches!(r, BatchResult::Error(_)))
+        .count();
+
+    println!("     ✅ SET operations successful: {}", set_count);
+    println!("     ✅ GET results: {}", get_count);
+
+    // Demonstrate priority batch operations
+    println!("  3. Priority batch operations...");
+    let batch_optimizer = client.get_batch_processor();
+
+    // Add high priority operations
+    for i in 1..=5 {
+        let key = format!("priority:high:{}", i);
+        let value = format!("High Priority {}", i);
+
+        batch_optimizer.exec_batch(
+            vec![Box::new(SetCommand::new(key, value).with_ttl(Duration::from_secs(300)))]
+        )?;
     }
 
-    println!("   ✅ SET成功: {} 个", set_success);
-    println!("   ✅ GET结果: {} 个", set_success);
+    println!("     🚀 Added 5 high priority operations");
 
-    Ok(())
-}
+    // Add normal priority operations
+    for i in 1..=20 {
+        let key = format!("priority:normal:{}", i);
+        let value = format!("Normal Priority {}", i);
 
-fn transaction_operations(client: &RedissonClient) -> RedissonResult<()> {
-    println!("\n💳 事务操作示例:");
-
-    // 模拟银行转账场景
-    println!("   🏦 银行转账场景:");
-
-    // 初始化账户余额
-    let alice_account = client.get_bucket::<i64>("account:alice");
-    let bob_account = client.get_bucket::<i64>("account:bob");
-
-    alice_account.set(&1000)?;
-    bob_account.set(&500)?;
-
-    println!("   📊 转账前 - Alice: 1000, Bob: 500");
-
-    // 使用优化的事务API
-    let result = client.execute_transaction(|tx| {
-        // 这里使用闭包来构建事务，支持自动重试
-        let alice_balance: i64 = tx.query("account:alice")?;
-        if alice_balance < 200 {
-            return Err(RedissonError::InvalidOperation("Alice余额不足".to_string()));
-        }
-
-        let bob_balance: i64 = tx.query("account:bob").unwrap_or(0);
-
-        tx.set("account:alice", &(alice_balance - 200))?
-            .set("account:bob", &(bob_balance + 200))?
-            .set("transaction:log", &"Transfer 200 from Alice to Bob".to_string())?;
-
-        Ok(())
-    });
-
-    match result {
-        Ok(()) => {
-            println!("   ✅ 转账成功!");
-
-            let alice_after: i64 = alice_account.get()?.unwrap_or(0);
-            let bob_after: i64 = bob_account.get()?.unwrap_or(0);
-
-            println!("   📊 转账后 - Alice: {}, Bob: {}", alice_after, bob_after);
-        }
-        Err(e) => {
-            println!("   ❌ 转账失败: {}", e);
-
-            // 显示最终余额（应该是原始值）
-            let alice_final: i64 = alice_account.get()?.unwrap_or(0);
-            let bob_final: i64 = bob_account.get()?.unwrap_or(0);
-            println!("   📊 最终余额 - Alice: {}, Bob: {}", alice_final, bob_final);
-        }
+        batch_optimizer.exec_batch(
+            vec![Box::new(SetCommand::new(key, value))]
+        )?;
     }
 
-    Ok(())
-}
+    println!("     📄 Added 20 normal priority operations");
 
-fn pubsub_example(client: &RedissonClient) -> RedissonResult<()> {
-    println!("\n📢 发布订阅示例:");
-
-    let topic = client.get_topic("chat:room:general");
-
-    // 启动订阅者线程
-    let topic_clone = topic.clone();
-    
-    let subscriber_handle = thread::spawn(move || {
-        println!("   👂 订阅者启动，等待消息...");
-
-        topic_clone.add_listener_fn(|channel, message| {
-            println!("   📩 收到消息: {}", message);
-        }).unwrap();
-
-        // 保持订阅
-        thread::sleep(Duration::from_secs(3));
-    });
-
-    // 等待订阅者就绪
-    thread::sleep(Duration::from_millis(100));
-
-    // 发布消息
-    println!("   📤 发布消息...");
-    topic.publish(&"Hello everyone!".to_string())?;
-    thread::sleep(Duration::from_millis(100));
-
-    topic.publish(&"How are you doing?".to_string())?;
-    thread::sleep(Duration::from_millis(100));
-
-    topic.publish(&"Goodbye!".to_string())?;
-
-    // 等待消息处理
-    thread::sleep(Duration::from_millis(500));
-
-    subscriber_handle.join().unwrap();
-    println!("   ✅ 发布订阅示例完成");
+    // Flush immediately
+    batch_optimizer.flush()?;
+    println!("     🔄 Batch flush completed");
 
     Ok(())
 }
 
-fn delayed_queue_example(client: &RedissonClient) -> RedissonResult<()> {
-    println!("\n⏰ 延迟队列示例:");
+fn cache_integration_demo(client: &RedissonClient) -> RedissonResult<()> {
+    println!("  1. Creating integrated cache...");
+    let user_cache = client.get_cache::<String, UserSession>("user_sessions");
 
-    let delayed_queue = client.get_delayed_queue::<String>("tasks:delayed");
-    let task_queue = client.get_list::<String>("tasks:ready");
+    println!("     💾 Cache created successfully (read-through/write-through mode)");
 
-    // 添加延迟任务
-    println!("   🕐 添加延迟任务 (3秒后执行)...");
-    delayed_queue.offer(&"Process user data".to_string(), Duration::from_secs(3))?;
+    // Create session data
+    println!("  2. Setting cache data...");
+    let session = UserSession {
+        user_id: "user123".to_string(),
+        session_token: "abc123def456".to_string(),
+        created_at: 1234567890,
+        last_activity: 1234567990,
+        ip_address: "192.168.1.100".to_string(),
+    };
 
-    delayed_queue.offer(&"Send email notification".to_string(), Duration::from_secs(5))?;
+    user_cache.set("user123".to_string(), session.clone())?;
+    println!("     💾 Session data cached");
 
-    delayed_queue.offer(&"Generate report".to_string(), Duration::from_secs(8))?;
+    // Read data (should hit local cache)
+    println!("  3. Reading cached data...");
+    let start = std::time::Instant::now();
 
-    println!("   👀 监控任务队列...");
+    let cached_session = user_cache.get(&"user123".to_string())?;
+    let first_duration = start.elapsed();
 
-    // 监控任务队列
-    let start_time = std::time::Instant::now();
-    let mut completed_tasks = 0;
-
-    while completed_tasks < 3 && start_time.elapsed() < Duration::from_secs(10) {
-        if let Some(task) = task_queue.pop_front()? {
-            println!("   ✅ 任务执行: {} (延迟: {:?})", task, start_time.elapsed());
-            completed_tasks += 1;
-        }
-        thread::sleep(Duration::from_millis(100));
+    if let Some(session) = cached_session {
+        println!("     ✅ Cache hit: User {}", session.user_id);
+        println!("     ⚡ First read duration: {:?}", first_duration);
     }
 
-    println!("   📊 完成 {} 个延迟任务", completed_tasks);
+    // Read again (should be faster)
+    println!("  4. Reading again (local cache)...");
+    let start = std::time::Instant::now();
+
+    let cached_session2 = user_cache.get(&"user123".to_string())?;
+    let second_duration = start.elapsed();
+
+    println!("     ⚡ Second read duration: {:?}", second_duration);
+    println!("     🚀 Performance improvement: {:.1}x",
+             first_duration.as_nanos() as f64 / second_duration.as_nanos() as f64);
+
+    // Get cache statistics
+    println!("  5. Cache statistics...");
+    let cache_stats = user_cache.get_local_cache().get_stats();
+    let client_stats = client.get_stats();
+
+    println!("     📊 Local cache hit rate: {:.1}%",
+             client_stats.cache_stats.avg_hit_rate * 100.0);
+    println!("     💿 Local cache entries: {}", cache_stats.total_entries);
+    println!("     🔥 Local cache hits: {}", cache_stats.total_hits);
+
+    // Clear cache
+    println!("  6. Clearing cache...");
+    user_cache.clear()?;
+    println!("     🧹 Cache cleared");
 
     Ok(())
 }
 
-fn async_example() -> RedissonResult<()> {
-    println!("\n⚡ 异步操作示例:");
+fn show_stats(client: &RedissonClient) -> RedissonResult<()> {
+    let stats = client.get_stats();
 
-    // 使用Tokio运行时执行异步代码
+    println!("  Connection Pool Statistics:");
+    println!("    📈 Total connections created: {}", stats.connection_stats.total_connections_created);
+    println!("    🔄 Connection reuse rate: {:.1}%",
+             stats.connection_stats.total_connections_reused as f64 /
+                 stats.connection_stats.total_operations as f64 * 100.0);
+    println!("    ⚡ Average wait time: {:.2}ms", stats.connection_stats.total_wait_time_ms);
+    println!("    📊 Peak connections: {}", stats.connection_stats.peak_connections);
+
+    println!("\n  Batch Operation Statistics:");
+    println!("    📦 Total batches: {}", stats.batch_stats.total_batches);
+    println!("    📝 Total commands: {}", stats.batch_stats.total_commands);
+    println!("    📏 Average batch size: {:.1}", stats.batch_stats.avg_batch_size);
+    println!("    ⏱️  Average execution time: {:.2}ms", stats.batch_stats.avg_execution_time_ms);
+
+    println!("\n  Cache Statistics:");
+    println!("    🎯 Total hits: {}", stats.cache_stats.total_hits);
+    println!("    ❌ Total misses: {}", stats.cache_stats.total_misses);
+    println!("    📈 Hit rate: {:.1}%", stats.cache_stats.avg_hit_rate * 100.0);
+    println!("    🗑️  Total evictions: {}", stats.cache_stats.total_evictions);
+
+    Ok(())
+}
+
+fn async_demo() -> RedissonResult<()> {
     let rt = Runtime::new().unwrap();
 
     rt.block_on(async {
+        println!("  1. Creating async client...");
+
         let config = RedissonConfig::single_server("redis://127.0.0.1:6379");
         let client = AsyncRedissonClient::new(config).await.unwrap();
 
-        println!("   ✅ 异步客户端创建成功");
+        println!("     ✅ Async client created successfully");
 
-        // 异步锁
-        let lock = client.get_lock("async:test");
+        println!("  2. Async lock operations...");
+        let lock = client.get_lock("async:demo:lock");
+
         lock.lock().await.unwrap();
-        println!("   🔒 异步锁获取成功");
+        println!("     🔒 Async lock acquired successfully");
 
-        // 异步数据操作
-        let bucket = client.get_bucket::<String>("async:data");
-        bucket.set(&"Async value".to_string()).await.unwrap();
-
-        let value = bucket.get().await.unwrap();
-        println!("   📦 异步数据: {:?}", value);
-
-        // 异步原子操作
-        let atomic = client.get_atomic_long("async:counter");
-        let count = atomic.increment_and_get().await.unwrap();
-        println!("   🔢 异步计数器: {}", count);
+        // Simulate async operation
+        tokio::time::sleep(Duration::from_millis(100)).await;
 
         lock.unlock().await.unwrap();
-        println!("   🔓 异步锁释放成功");
+        println!("     🔓 Async lock released successfully");
+
+        println!("  3. Async data operations...");
+        let bucket = client.get_bucket::<String>("async:demo:data");
+
+        bucket.set(&"Hello Async".to_string()).await.unwrap();
+        println!("     💾 Data set successfully");
+
+        let value = bucket.get().await.unwrap();
+        println!("     📖 Read data: {:?}", value);
 
         client.shutdown().await.unwrap();
+        println!("     🔌 Async client closed");
     });
-
-    println!("   ✅ 异步操作示例完成");
 
     Ok(())
 }
+

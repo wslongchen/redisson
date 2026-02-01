@@ -18,6 +18,7 @@
  *  *
  *
  */
+
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 use std::time::Duration;
 use std::sync::Arc;
@@ -50,7 +51,7 @@ impl Default for BenchmarkData {
     }
 }
 
-fn create_client() -> RedissonClient {
+fn create_benchmark_client() -> RedissonClient {
     let config = RedissonConfig::single_server("redis://172.16.8.16:6379")
         .with_pool_size(10)
         .with_connection_timeout(Duration::from_millis(500))
@@ -64,7 +65,7 @@ fn create_client() -> RedissonClient {
 }
 
 fn bench_lock(c: &mut Criterion) {
-    let client = create_client();
+    let client = create_benchmark_client();
 
     c.bench_function("lock_unlock", |b| {
         b.iter(|| {
@@ -76,7 +77,7 @@ fn bench_lock(c: &mut Criterion) {
 }
 
 fn bench_stream(c: &mut Criterion) {
-    let client = create_client();
+    let client = create_benchmark_client();
     let stream = client.get_stream::<BenchmarkData>("bench:stream");
 
     c.bench_function("stream_add_auto_id", |b| {
@@ -90,7 +91,7 @@ fn bench_stream(c: &mut Criterion) {
 }
 
 fn bench_batch(c: &mut Criterion) {
-    let client = create_client();
+    let client = create_benchmark_client();
 
     c.bench_function("batch_100_sets", |b| {
         b.iter(|| {
@@ -104,7 +105,7 @@ fn bench_batch(c: &mut Criterion) {
 }
 
 fn bench_cache(c: &mut Criterion) {
-    let client = create_client();
+    let client = create_benchmark_client();
     let cache = client.get_cache::<String, BenchmarkData>("bench:cache");
     let data = BenchmarkData::default();
 
@@ -117,7 +118,7 @@ fn bench_cache(c: &mut Criterion) {
 }
 
 fn bench_concurrent_streams(c: &mut Criterion) {
-    let client = Arc::new(create_client());
+    let client = Arc::new(create_benchmark_client());
 
     c.bench_function("concurrent_streams_10x10", |b| {
         b.iter(|| {
@@ -145,7 +146,7 @@ fn bench_concurrent_streams(c: &mut Criterion) {
 }
 
 fn bench_mixed_operations(c: &mut Criterion) {
-    let client = create_client();
+    let client = create_benchmark_client();
 
     c.bench_function("mixed_operations", |b| {
         b.iter(|| {
@@ -172,22 +173,22 @@ fn bench_mixed_operations(c: &mut Criterion) {
 }
 
 fn bench_memory_efficiency(c: &mut Criterion) {
-    let client = create_client();
+    let client = create_benchmark_client();
 
     c.bench_function("memory_efficiency_100_objects", |b| {
         let mut caches = Vec::new();
         for i in 0..100 {
-            // 在基准测试循环外创建
+            // Create outside benchmark loop
             caches.push(client.get_cache::<String, String>(&format!("cache:{}", i)));
         }
-        
+
         b.iter(|| {
             for (i, cache) in caches.iter().enumerate() {
-                // 直接使用缓存的实例
+                // Use cached instance directly
                 cache.set("test".to_string(), "value".to_string()).unwrap();
             }
 
-            // 清理
+            // Cleanup
             for cache in &caches {
                 cache.clear().unwrap();
             }
@@ -195,12 +196,12 @@ fn bench_memory_efficiency(c: &mut Criterion) {
     });
 }
 
-// 对比基准测试组
+// Comparative benchmark group
 fn compare_benchmarks(c: &mut Criterion) {
-    let client = create_client();
+    let client = create_benchmark_client();
 
     let mut group = c.benchmark_group("comparison");
-    group.sample_size(10);  // 减少采样数以加快速度
+    group.sample_size(10);  // Reduce sample size for speed
 
     group.bench_function("simple_lock", |b| {
         b.iter(|| {
@@ -240,9 +241,9 @@ fn compare_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
-// 参数化基准测试
+// Parameterized benchmarks
 fn parameterized_benchmarks(c: &mut Criterion) {
-    let client = Arc::new(create_client());
+    let client = Arc::new(create_benchmark_client());
 
     let mut group = c.benchmark_group("parameterized");
 
@@ -291,7 +292,7 @@ fn parameterized_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
-// 使用 async 的基准测试）
+// Async benchmark tests (requires async executor)
 fn bench_async_operations(c: &mut Criterion) {
     use redisson::AsyncRedissonClient;
 
@@ -307,13 +308,13 @@ fn bench_async_operations(c: &mut Criterion) {
     });
 }
 
-// 定义基准测试组
+// Define benchmark groups
 criterion_group!(
     name = basic_benches;
     config = Criterion::default()
-        .sample_size(20)          // 采样数
-        .warm_up_time(Duration::from_secs(3))  // 预热时间
-        .measurement_time(Duration::from_secs(10)); // 测量时间
+        .sample_size(20)          // Sample size
+        .warm_up_time(Duration::from_secs(3))  // Warm-up time
+        .measurement_time(Duration::from_secs(10)); // Measurement time
     targets = bench_lock, bench_stream, bench_batch, bench_cache, bench_mixed_operations
 );
 
@@ -344,10 +345,10 @@ criterion_group!(
     targets = bench_async_operations
 );
 
-// 运行所有基准测试组
+// Run all benchmark groups
 criterion_main!(
     basic_benches,
     concurrency_benches,
     comparison_benches,
-    // async_benches,  // 可选
+    // async_benches,  // Optional
 );

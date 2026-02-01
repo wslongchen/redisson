@@ -18,34 +18,34 @@
  *  *
  *
  */
+use redisson::{RedissonClient, RedissonConfig, RedissonResult};
 use std::time::Duration;
-use redisson::{AsyncRedissonClient, RedissonClient, RedissonConfig, RedissonResult};
 
 fn main() -> RedissonResult<()> {
-    // 1. 创建配置
+    // 1. Create configuration
     let config = RedissonConfig::single_server("redis://127.0.0.1:6379")
         .with_pool_size(20)
         .with_watchdog_timeout(Duration::from_secs(30));
 
-    // 2. 创建同步客户端
+    // 2. Create synchronous client
     let client = RedissonClient::new(config)?;
 
-    // 3. 使用分布式数据结构
+    // 3. Use distributed data structures
     let bucket = client.get_bucket::<String>("my_bucket");
     bucket.set(&"Hello World".to_string())?;
     let value: Option<String> = bucket.get()?;
     println!("Bucket value: {:?}", value);
 
-    // 4. 使用分布式锁
+    // 4. Use distributed lock
     let lock = client.get_lock("my_lock");
     lock.lock()?;
 
-    // 执行受保护的代码
+    // Execute protected code
     println!("Critical section accessed");
 
     lock.unlock()?;
 
-    // 5. 使用Map
+    // 5. Use Map
     let map = client.get_map::<String, i32>("my_map");
     map.put(&"key1".to_string(), &42)?;
     let map_value = map.get(&"key1".to_string())?;
@@ -56,29 +56,3 @@ fn main() -> RedissonResult<()> {
 }
 
 // examples/async_usage.rs
-#[tokio::main]
-async fn async_main() -> RedissonResult<()> {
-    // 1. 创建配置
-    let config = RedissonConfig::single_server("redis://127.0.0.1:6379");
-
-    // 2. 创建异步客户端
-    let client = AsyncRedissonClient::new(config).await?;
-
-    // 3. 使用异步分布式数据结构
-    let bucket = client.get_bucket::<String>("async_bucket");
-    bucket.set(&"Async Hello".to_string()).await?;
-    let value = bucket.get().await?;
-    println!("Async bucket value: {:?}", value);
-
-    // 4. 使用异步分布式锁
-    let lock = client.get_lock("async_lock");
-    lock.lock().await?;
-
-    // 执行受保护的异步代码
-    println!("Async critical section accessed");
-
-    lock.unlock().await?;
-
-    client.shutdown().await?;
-    Ok(())
-}
