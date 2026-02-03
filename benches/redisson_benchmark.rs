@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::thread;
 use criterion::async_executor::FuturesExecutor;
 use serde::{Serialize, Deserialize};
-use redisson::{BatchConfig, Cache, RedissonClient, RedissonConfig};
+use redisson::{BatchConfig, RedissonClient, RedissonConfig};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct BenchmarkData {

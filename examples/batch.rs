@@ -21,7 +21,7 @@
 use std::time::Duration;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use redisson::{BatchResult, Cache, RedissonClient, RedissonConfig, RedissonResult, SetCommand};
+use redisson::{BatchResult, RedissonClient, RedissonConfig, RedissonResult, SetCommand};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Order {
@@ -85,8 +85,10 @@ fn main() -> RedissonResult<()> {
     batch_optimization_demo(&client)?;
 
     // 5. Demonstrate local cache integration
-    println!("\n💾 Local Cache Integration Demo");
-    cache_integration_demo(&client)?;
+    #[cfg(feature = "caching")] {
+        println!("\n💾 Local Cache Integration Demo");
+        cache_integration_demo(&client)?;
+    }
 
     // 6. Demonstrate performance statistics
     println!("\n📊 Performance Statistics");
@@ -259,6 +261,7 @@ fn batch_optimization_demo(client: &RedissonClient) -> RedissonResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "caching")]
 fn cache_integration_demo(client: &RedissonClient) -> RedissonResult<()> {
     println!("  1. Creating integrated cache...");
     let user_cache = client.get_cache::<String, UserSession>("user_sessions");
@@ -306,8 +309,7 @@ fn cache_integration_demo(client: &RedissonClient) -> RedissonResult<()> {
     let cache_stats = user_cache.get_local_cache().get_stats();
     let client_stats = client.get_stats();
 
-    println!("     📊 Local cache hit rate: {:.1}%",
-             client_stats.cache_stats.avg_hit_rate * 100.0);
+    println!("     📊 Local cache hit rate: {:.1}%", client_stats.cache_stats.avg_hit_rate * 100.0);
     println!("     💿 Local cache entries: {}", cache_stats.total_entries);
     println!("     🔥 Local cache hits: {}", cache_stats.total_hits);
 
@@ -336,11 +338,14 @@ fn show_stats(client: &RedissonClient) -> RedissonResult<()> {
     println!("    📏 Average batch size: {:.1}", stats.batch_stats.avg_batch_size);
     println!("    ⏱️  Average execution time: {:.2}ms", stats.batch_stats.avg_execution_time_ms);
 
-    println!("\n  Cache Statistics:");
-    println!("    🎯 Total hits: {}", stats.cache_stats.total_hits);
-    println!("    ❌ Total misses: {}", stats.cache_stats.total_misses);
-    println!("    📈 Hit rate: {:.1}%", stats.cache_stats.avg_hit_rate * 100.0);
-    println!("    🗑️  Total evictions: {}", stats.cache_stats.total_evictions);
+    #[cfg(feature = "caching")]
+    {
+        println!("\n  Cache Statistics:");
+        println!("    🎯 Total hits: {}", stats.cache_stats.total_hits);
+        println!("    ❌ Total misses: {}", stats.cache_stats.total_misses);
+        println!("    📈 Hit rate: {:.1}%", stats.cache_stats.avg_hit_rate * 100.0);
+        println!("    🗑️  Total evictions: {}", stats.cache_stats.total_evictions);
+    }
 
     Ok(())
 }
