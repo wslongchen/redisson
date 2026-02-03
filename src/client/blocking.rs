@@ -21,7 +21,9 @@
 
 
 use crate::client::stats::ClientStats;
-use crate::{BatchProcessor, LocalCacheManager, RAtomicLong, RBatch, RBitSet, RBlockingQueue, RBloomFilter, RBucket, RCountDownLatch, RDelayedQueue, RFairLock, RGeo, RKeys, RList, RLock, RMap, RMultiLock, RRateLimiter, RReadWriteLock, RRedLock, RSemaphore, RSet, RSortedSet, RStream, RTopic, RedisIntegratedCache, RedissonConfig, RedissonResult, SyncRedisConnectionManager, SyncTransactionBuilder, SyncTransactionContext};
+use crate::{BatchProcessor, RAtomicLong, RBatch, RBitSet, RBlockingQueue, RBloomFilter, RBucket, RCountDownLatch, RDelayedQueue, RFairLock, RGeo, RKeys, RList, RLock, RMap, RMultiLock, RRateLimiter, RReadWriteLock, RRedLock, RSemaphore, RSet, RSortedSet, RStream, RTopic, RedissonConfig, RedissonResult, SyncRedisConnectionManager, SyncTransactionBuilder, SyncTransactionContext};
+#[cfg(feature = "caching")]
+use crate::{LocalCacheManager, RedisIntegratedCache};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::sync::Arc;
@@ -32,6 +34,7 @@ pub struct RedissonClient {
     config: RedissonConfig,
     connection_manager: Arc<SyncRedisConnectionManager>,
     batch_processor: Arc<BatchProcessor>,
+    #[cfg(feature = "caching")]
     cache_manager: Arc<LocalCacheManager<String, String>>,
 }
 
@@ -43,17 +46,15 @@ impl RedissonClient {
         // Create the batch optimizer
         let batch_optimizer = BatchProcessor::new(connection_manager.clone(), config.batch_config.clone().unwrap_or_default())?;
 
-        // Create a cache manager
-        let cache_manager = Arc::new(LocalCacheManager::new(
-            Duration::from_secs(300),
-            1000,
-        ));
-        
         Ok(Self {
             config,
             connection_manager,
             batch_processor: Arc::new(batch_optimizer),
-            cache_manager,
+            #[cfg(feature = "caching")]
+            cache_manager: Arc::new(LocalCacheManager::new(
+                Duration::from_secs(300),
+                1000,
+            )),
         })
     }
     
@@ -194,6 +195,7 @@ impl RedissonClient {
 
 
     // Adding caching support
+    #[cfg(feature = "caching")]
     pub fn get_cache<K, V>(&self, name: &str) -> RedisIntegratedCache<K, V>
     where
         K: std::cmp::Eq + std::hash::Hash + Clone + serde::Serialize + serde::de::DeserializeOwned + 'static + std::fmt::Debug,
@@ -213,6 +215,7 @@ impl RedissonClient {
         ClientStats {
             connection_stats: self.connection_manager.get_stats(),
             batch_stats: self.batch_processor.get_stats(),
+            #[cfg(feature = "caching")]
             cache_stats: self.cache_manager.get_stats(),
         }
     }
@@ -231,6 +234,7 @@ impl Clone for RedissonClient {
             config: self.config.clone(),
             connection_manager: self.connection_manager.clone(),
             batch_processor: self.batch_processor.clone(),
+            #[cfg(feature = "caching")]
             cache_manager: self.cache_manager.clone(),
         }
     }

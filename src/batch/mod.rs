@@ -63,23 +63,6 @@ impl Default for BatchPriority {
     }
 }
 
-// ================ Cache values ================
-
-/// Cache values
-pub struct CachedValue<T> {
-    pub value: T,
-    pub expiry: Instant,
-    pub created: Instant,
-    pub hits: u64,
-    pub size_bytes: usize,
-}
-
-impl<T> CachedValue<T> {
-    pub fn is_expired(&self) -> bool {
-        Instant::now() > self.expiry
-    }
-}
-
 /// Batch statistics
 #[derive(Clone, Debug)]
 pub struct BatchStats {

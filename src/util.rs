@@ -51,7 +51,7 @@ impl RedisMapExt for HashMap<String, redis::Value> {
     }
 }
 
-pub fn get_random_string(len: usize) -> String {
+pub(crate) fn get_random_string(len: usize) -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(len)
@@ -59,24 +59,24 @@ pub fn get_random_string(len: usize) -> String {
         .collect()
 }
 
-pub fn get_lock_id() -> String {
+pub(crate) fn get_lock_id() -> String {
     Uuid::new_v4().to_string()
 }
 
-pub fn num_milliseconds(duration: &Duration) -> u64 {
+pub(crate) fn num_milliseconds(duration: &Duration) -> u64 {
     duration.as_millis() as u64
 }
 
-pub fn calculate_drift(ttl: Duration, drift_factor: f64) -> Duration {
+pub(crate) fn calculate_drift(ttl: Duration, drift_factor: f64) -> Duration {
     let drift_ms = (ttl.as_millis() as f64 * drift_factor).ceil() as u64;
     Duration::from_millis(drift_ms)
 }
 
-pub fn calculate_quorum(n: usize) -> usize {
+pub(crate) fn calculate_quorum(n: usize) -> usize {
     (n as f64 / 2.0).floor() as usize + 1
 }
 
-pub fn jitter_delay(base_delay: Duration, jitter_ms: u64) -> Duration {
+pub(crate) fn jitter_delay(base_delay: Duration, jitter_ms: u64) -> Duration {
     let mut rng = rand::thread_rng();
     let jitter = rng.gen_range(0..=jitter_ms) as i64;
     if rng.gen_bool(0.5) {
@@ -87,7 +87,7 @@ pub fn jitter_delay(base_delay: Duration, jitter_ms: u64) -> Duration {
 }
 
 // Helper function to get the thread ID
-pub fn thread_id_to_u64() -> u64 {
+pub(crate) fn thread_id_to_u64() -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     thread::current().id().hash(&mut hasher);
     hasher.finish()

@@ -1,4 +1,4 @@
-// #![allow(unused_imports,unreachable_patterns,dead_code,missing_docs, incomplete_features,unused_variables)]
+#![allow(unused_imports,unreachable_patterns,dead_code,missing_docs, incomplete_features,unused_variables)]
 /*
  *
  *  *
@@ -29,10 +29,12 @@ mod batch;
 mod lock;
 mod scripts;
 mod connection;
+#[cfg(feature = "caching")]
 mod cache;
 mod network_latency;
 mod transaction;
 
+#[cfg(feature = "caching")]
 pub use cache::*;
 pub use transaction::*;
 pub use network_latency::*;

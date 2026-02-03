@@ -20,11 +20,13 @@ path = "src/lib.rs"
 default = ["sync"]
 sync = ["r2d2"]
 
+caching = []
+
 # Asynchronous mode (requires tokio runtime)
 async = ["tokio/full", "async-trait", "futures", "deadpool", "tokio-stream"]
 
 # Full features (synchronous + asynchronous + all features)
-full = ["sync", "async"]
+full = ["sync", "async", "caching"]
 
 [dependencies]
 # Redis core dependencies (including base functionality)

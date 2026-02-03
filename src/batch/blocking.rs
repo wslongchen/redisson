@@ -30,8 +30,10 @@ use redis::{Value};
 use tracing::{error, info, warn};
 use crate::errors::{RedissonError, RedissonResult};
 use crate::{BatchConfig, BatchGroup, BatchPriority, BatchResult, BatchStats, SyncRedisConnectionManager};
+#[cfg(feature = "caching")]
+use crate::{CachedValue};
 use redis::{ConnectionLike, Pipeline};
-use crate::batch::{BackoffStrategy, CachedValue};
+use crate::batch::{BackoffStrategy};
 use crate::batch::command_builder::CommandBuilder;
 
 // ================ Batch processor ================
@@ -50,6 +52,7 @@ pub struct BatchProcessor {
     stats: Arc<RwLock<BatchStats>>,
 
     // CACHING
+    #[cfg(feature = "caching")]
     cache: Option<Arc<RwLock<LruCache<String, CachedValue<BatchResult>>>>>,
 
     // Close flag
@@ -70,6 +73,7 @@ impl BatchProcessor {
             config: config.clone(),
             pending_batches: Arc::new(Mutex::new(VecDeque::new())),
             stats: Arc::new(RwLock::new(BatchStats::new())),
+            #[cfg(feature = "caching")]
             cache: None,
             is_closed: Arc::new(AtomicBool::new(false)),
             flusher_handle: Arc::new(Mutex::new(None)),
@@ -77,6 +81,7 @@ impl BatchProcessor {
 
         // Initializing the cache
         let mut processor = processor;
+        #[cfg(feature = "caching")]
         if processor.config.enable_cache {
             processor.cache = Some(Arc::new(RwLock::new(LruCache::new(
                 NonZeroUsize::new(processor.config.cache_size).unwrap()
@@ -181,6 +186,7 @@ impl BatchProcessor {
         }
 
         // Check cache (if enabled and results needed)
+        #[cfg(feature = "caching")]
         if self.config.enable_cache && needs_result && self.is_read_only_batch(&commands) {
             if let Some(cached_results) = self.get_cached_results(&commands) {
                 {
@@ -220,6 +226,7 @@ impl BatchProcessor {
         self.record_stats(start, commands.len(), is_success, false);
 
         // Update cache (if enabled)
+        #[cfg(feature = "caching")]
         if self.config.enable_cache && needs_result && is_success {
             if let Ok(results) = &result {
                 self.update_cache(&commands, results);
@@ -235,6 +242,7 @@ impl BatchProcessor {
     }
 
     /// Get the result from the cache
+    #[cfg(feature = "caching")]
     fn get_cached_results(&self, commands: &[Box<dyn CommandBuilder>]) -> Option<Vec<BatchResult>> {
         if let Some(cache) = &self.cache {
             let mut cache = cache.write();
@@ -265,6 +273,7 @@ impl BatchProcessor {
     }
 
     /// Updating the cache
+    #[cfg(feature = "caching")]
     fn update_cache(&self, commands: &[Box<dyn CommandBuilder>], results: &[BatchResult]) {
         if let Some(cache) = &self.cache {
             let mut cache = cache.write();
@@ -288,6 +297,8 @@ impl BatchProcessor {
                 created: now,
                 hits: 0,
                 size_bytes,
+                last_accessed: Instant::now(),
+                metadata: None,
             });
         }
     }
@@ -760,6 +771,7 @@ impl Clone for BatchProcessor {
             config: self.config.clone(),
             pending_batches: self.pending_batches.clone(),
             stats: self.stats.clone(),
+            #[cfg(feature = "caching")]
             cache: self.cache.clone(),
             is_closed: Arc::new(AtomicBool::new(false)),
             flusher_handle: Arc::new(Mutex::new(None)),

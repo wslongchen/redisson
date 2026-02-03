@@ -140,7 +140,7 @@ impl RReadLock {
     pub fn lock_with_lease_time(&self, lease_time: Duration) -> RedissonResult<()> {
         let lock_info = self.try_acquire_with_retry(lease_time, None)?;
 
-        // 启动看门狗（如果租约时间为0，表示需要自动续期）
+        // Start the watchdog (if the lease is 0, it needs to be automatically renewed)
         if lease_time.as_secs() == 0 {
             self.start_watchdog(lock_info.value.clone());
         }

@@ -19,13 +19,14 @@
  *  
  */
 use std::time::{Duration, Instant};
-use crate::{BatchStats, CacheStats};
+use crate::{BatchStats};
 
 #[derive(Debug, Clone)]
 pub struct ClientStats {
     pub connection_stats: ConnectionStats,
     pub batch_stats: BatchStats,
-    pub cache_stats: CacheStats,
+    #[cfg(feature = "caching")]
+    pub cache_stats: crate::CacheStats,
 }
 
 

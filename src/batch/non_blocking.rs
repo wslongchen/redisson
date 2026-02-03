@@ -31,7 +31,7 @@ use tracing::{info, error};
 
 use crate::errors::RedissonError;
 use crate::connection::AsyncRedisConnectionManager;
-use crate::{BatchConfig, BatchGroup, BatchPriority, BatchResult, BatchStats, CachedValue, CommandBuilder, RedissonResult};
+use crate::{BatchConfig, BatchGroup, BatchPriority, BatchResult, BatchStats, CommandBuilder, RedissonResult};
 // ================ Asynchronous batch processors ================
 /// Asynchronous batch processors
 pub struct AsyncBatchProcessor {
@@ -48,7 +48,8 @@ pub struct AsyncBatchProcessor {
     stats: Arc<RwLock<BatchStats>>,
 
     // caching
-    cache: Option<Arc<RwLock<LruCache<String, CachedValue<BatchResult>>>>>,
+    #[cfg(feature = "caching")]
+    cache: Option<Arc<RwLock<LruCache<String, crate::CachedValue<BatchResult>>>>>,
 
     // Close flag
     is_closed: tokio::sync::watch::Sender<bool>,
@@ -76,6 +77,7 @@ impl AsyncBatchProcessor {
             config: config.clone(),
             pending_batches: Arc::new(Mutex::new(VecDeque::new())),
             stats: Arc::new(RwLock::new(BatchStats::new())),
+            #[cfg(feature = "caching")]
             cache: None,
             is_closed: tx,
             flush_notify: Arc::new(Notify::new()),
@@ -86,6 +88,7 @@ impl AsyncBatchProcessor {
         let mut processor = processor;
 
         // Initializing the cache
+        #[cfg(feature = "caching")]
         if processor.config.enable_cache {
             processor.cache = Some(Arc::new(RwLock::new(LruCache::new(
                 NonZeroUsize::new(processor.config.cache_size).unwrap()
@@ -133,6 +136,7 @@ impl AsyncBatchProcessor {
         }
 
         // Checking the cache
+        #[cfg(feature = "caching")]
         if self.config.enable_cache && needs_result && self.is_read_only_batch(&commands).await {
             if let Some(cached_results) = self.get_cached_results(&commands).await {
                 let mut stats = self.stats.write().await;
@@ -180,6 +184,7 @@ impl AsyncBatchProcessor {
         self.record_stats(start, commands.len(), is_success, false).await;
 
         // Updating the cache
+        #[cfg(feature = "caching")]
         if self.config.enable_cache && needs_result && is_success {
             if let Ok(results) = &result {
                 self.update_cache(&commands, results).await;
@@ -298,6 +303,7 @@ impl AsyncBatchProcessor {
     }
 
     /// Get the result from the cache
+    #[cfg(feature = "caching")]
     async fn get_cached_results(&self, commands: &[Box<dyn CommandBuilder>]) -> Option<Vec<BatchResult>> {
         if let Some(cache) = &self.cache {
             let mut cache = cache.write().await;
@@ -328,6 +334,7 @@ impl AsyncBatchProcessor {
     }
 
     /// Updating the cache
+    #[cfg(feature = "caching")]
     async fn update_cache(&self, commands: &[Box<dyn CommandBuilder>], results: &[BatchResult]) {
         if let Some(cache) = &self.cache {
             let mut cache = cache.write().await;
@@ -344,13 +351,15 @@ impl AsyncBatchProcessor {
             // Serializing the result (simplifies processing)
             let size_bytes = std::mem::size_of_val(results);
 
-            cache.put(cache_key, CachedValue {
+            cache.put(cache_key, crate::CachedValue {
                 // This is where you store the serialized result to make things easier
                 value: BatchResult::Nil,
                 expiry: expires_at,
                 created: now,
                 hits: 0,
                 size_bytes,
+                last_accessed: Instant::now(),
+                metadata: None,
             });
         }
     }
@@ -663,6 +672,7 @@ impl Clone for AsyncBatchProcessor {
             config: self.config.clone(),
             pending_batches: self.pending_batches.clone(),
             stats: self.stats.clone(),
+            #[cfg(feature = "caching")]
             cache: self.cache.clone(),
             is_closed: self.is_closed.clone(),
             flush_notify: self.flush_notify.clone(),

@@ -19,7 +19,7 @@
  *  
  */
 use crate::client::stats::ClientStats;
-use crate::{AsyncBatchProcessor, AsyncLocalCacheManager, AsyncRAtomicLong, AsyncRBatch, AsyncRBitSet, AsyncRBlockingQueue, AsyncRBloomFilter, AsyncRBucket, AsyncRCountDownLatch, AsyncRFairLock, AsyncRGeo, AsyncRKeys, AsyncRList, AsyncRLock, AsyncRMap, AsyncRMultiLock, AsyncRRateLimiter, AsyncRReadWriteLock, AsyncRRedLock, AsyncRSemaphore, AsyncRSet, AsyncRSortedSet, AsyncRStream, AsyncRTopic, AsyncRedisConnectionManager, AsyncRedisIntegratedCache, AsyncTransactionBuilder, AsyncTransactionContext, RedissonConfig, RedissonResult};
+use crate::{AsyncBatchProcessor, AsyncRAtomicLong, AsyncRBatch, AsyncRBitSet, AsyncRBlockingQueue, AsyncRBloomFilter, AsyncRBucket, AsyncRCountDownLatch, AsyncRFairLock, AsyncRGeo, AsyncRKeys, AsyncRList, AsyncRLock, AsyncRMap, AsyncRMultiLock, AsyncRRateLimiter, AsyncRReadWriteLock, AsyncRRedLock, AsyncRSemaphore, AsyncRSet, AsyncRSortedSet, AsyncRStream, AsyncRTopic, AsyncRedisConnectionManager, AsyncTransactionBuilder, AsyncTransactionContext, RedissonConfig, RedissonResult};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::hash::Hash;
@@ -31,7 +31,8 @@ pub struct AsyncRedissonClient {
     config: RedissonConfig,
     connection_manager: Arc<AsyncRedisConnectionManager>,
     batch_processor: Arc<AsyncBatchProcessor>,
-    cache_manager: Arc<AsyncLocalCacheManager<String, String>>,
+    #[cfg(feature = "caching")]
+    cache_manager: Arc<crate::AsyncLocalCacheManager<String, String>>,
 }
 
 impl AsyncRedissonClient {
@@ -41,17 +42,15 @@ impl AsyncRedissonClient {
 
         // Create the batch optimizer
         let batch_optimizer = AsyncBatchProcessor::new(connection_manager.clone(), config.batch_config.clone().unwrap_or_default()).await?;
-        // Create a cache manager
-        let cache_manager = Arc::new(AsyncLocalCacheManager::new(
-            Duration::from_secs(300),
-            1000,
-        ));
-
         Ok(Self {
             config,
             connection_manager,
             batch_processor: Arc::new(batch_optimizer),
-            cache_manager,
+            #[cfg(feature = "caching")]
+            cache_manager: Arc::new(crate::AsyncLocalCacheManager::new(
+                Duration::from_secs(300),
+                1000,
+            )),
         })
     }
 
@@ -180,12 +179,13 @@ impl AsyncRedissonClient {
     }
 
     // Adding caching support
-    pub fn get_cache<K, V>(&self, name: &str) -> AsyncRedisIntegratedCache<K, V>
+    #[cfg(feature = "caching")]
+    pub fn get_cache<K, V>(&self, name: &str) -> crate::AsyncRedisIntegratedCache<K, V>
     where
         K: Eq + Hash + Clone + Serialize + DeserializeOwned + std::fmt::Debug + Send + Sync + 'static,
         V: Clone + Serialize + DeserializeOwned + Send + Sync + 'static
     {
-        AsyncRedisIntegratedCache::<K, V>::new(
+        crate::AsyncRedisIntegratedCache::<K, V>::new(
             self.connection_manager.clone(),
             name,
             Duration::from_secs(300),
@@ -199,6 +199,7 @@ impl AsyncRedissonClient {
         ClientStats {
             connection_stats: self.connection_manager.get_stats().await,
             batch_stats: self.batch_processor.get_stats().await,
+            #[cfg(feature = "caching")]
             cache_stats: self.cache_manager.get_stats().await,
         }
     }
@@ -217,6 +218,7 @@ impl Clone for AsyncRedissonClient {
             config: self.config.clone(),
             connection_manager: self.connection_manager.clone(),
             batch_processor: self.batch_processor.clone(),
+            #[cfg(feature = "caching")]
             cache_manager: self.cache_manager.clone(),
         }
     }
