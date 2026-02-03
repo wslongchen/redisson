@@ -19,6 +19,71 @@
  *  *
  *
  */
+//! 
+//! <p align="center">
+//!   <img src="https://img.icons8.com/color/96/000000/redis.png" alt="Redis Logo" width="96" height="96">
+//! </p>
+//! 
+//! <p align="center">
+//!   <strong>A Redis-based distributed synchronization and data structures library for Rust</strong>
+//! </p>
+//! 
+//! ## 🎯 Features
+//! 
+//! - **🔒 Distributed Locks**: Reentrant locks, fair locks, read-write locks, and RedLock algorithm with automatic renewal
+//! - **📊 Rich Data Structures**: Distributed maps, lists, sets, sorted sets, buckets, and streams
+//! - **⚡ Dual Runtime**: Full support for both synchronous and asynchronous operations
+//! - **🔄 Synchronization Primitives**: Semaphores, rate limiters, countdown latches, and atomic counters
+//! - **📈 High Performance**: Connection pooling, command pipelining, and batch operations
+//! - **💾 Local Cache Integration**: Read-through/write-through caching with local cache
+//! - **🔧 Comprehensive Configuration**: Flexible configuration for various Redis deployment modes
+//! - **🎯 Type Safety**: Full Rust type system support with compile-time checking
+//! - **🛡️ Production Ready**: Automatic reconnection, timeout handling, and comprehensive error management
+//! - **📡 Advanced Features**: Redis Stream support, delayed queues, and publish/subscribe messaging
+//! 
+//! ## 📦 Installation
+//! 
+//! Add this to your `Cargo.toml`:
+//! 
+//! ### Basic Installation
+//! ```toml
+//! [dependencies]
+//! redisson = "0.1"
+//! ```
+//!!
+//!! ```rust
+//! use redisson::{RedissonClient, RedissonConfig};
+//! use std::time::Duration;
+//! 
+//! fn main() -> redisson::RedissonResult<()> {
+//!     //! Create configuration
+//!     let config = RedissonConfig::single_server("redis://!127.0.0.1:6379")
+//!         .with_pool_size(10)
+//!         .with_connection_timeout(Duration::from_secs(5));
+//! 
+//!     //! Create client
+//!     let client = RedissonClient::new(config)?;
+//! 
+//!     //! Use distributed lock
+//!     let lock = client.get_lock("my-resource");
+//!     lock.lock()?;
+//!     println!("Critical section accessed");
+//!     lock.unlock()?;
+//! 
+//!     //! Use distributed data structures
+//!     let bucket = client.get_bucket::<String>("my-bucket");
+//!     bucket.set(&"Hello World".to_string())?;
+//!     let value: Option<String> = bucket.get()?;
+//!     println!("Bucket value: {:?}", value);
+//! 
+//!     //! Use distributed map
+//!     let map = client.get_map::<String, i32>("my-map");
+//!     map.put(&"key1".to_string(), &42)?;
+//! 
+//!     client.shutdown()?;
+//!     Ok(())
+//! }
+//! ```
 
 mod config;
 mod errors;
